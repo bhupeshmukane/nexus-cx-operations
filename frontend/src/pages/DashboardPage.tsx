@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Ticket,
   TicketFilterParams,
@@ -11,6 +11,8 @@ import { MetricsBar } from '../components/dashboard/MetricsBar';
 import { TicketFilters } from '../components/dashboard/TicketFilters';
 import { TicketTable } from '../components/dashboard/TicketTable';
 import { Pagination } from '../components/dashboard/Pagination';
+import { AlertCircle, RefreshCw } from 'lucide-react';
+import { Button } from '../components/common/Button';
 
 interface DashboardPageProps {
   onSelectTicket: (ticketId: string) => void;
@@ -34,6 +36,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   });
 
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -47,40 +50,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     pageSize: 10,
   });
 
-  useEffect(() => {
-    let active = true;
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [ticketsResponse, metricsResponse] = await Promise.all([
+        ticketService.getTickets(filters),
+        ticketService.getMetrics(),
+      ]);
 
-    async function fetchData() {
-      setIsLoading(true);
-      try {
-        const [ticketsResponse, metricsResponse] = await Promise.all([
-          ticketService.getTickets(filters),
-          ticketService.getMetrics(),
-        ]);
-
-        if (active) {
-          setTickets(ticketsResponse.tickets);
-          setTotalPages(ticketsResponse.totalPages);
-          setTotalCount(ticketsResponse.total);
-          setMetrics(metricsResponse);
-        }
-      } catch (err) {
-        if (active) {
-          console.error('Failed to load tickets/metrics:', err);
-        }
-      } finally {
-        if (active) {
-          setIsLoading(false);
-        }
-      }
+      setTickets(ticketsResponse.tickets);
+      setTotalPages(ticketsResponse.totalPages);
+      setTotalCount(ticketsResponse.total);
+      setMetrics(metricsResponse);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Failed to load tickets from NEXUS API server.';
+      setError(message);
+    } finally {
+      setIsLoading(false);
     }
+  }, [filters]);
 
+  useEffect(() => {
     fetchData();
-
-    return () => {
-      active = false;
-    };
-  }, [filters, refreshTrigger]);
+  }, [fetchData, refreshTrigger]);
 
   const handleResetFilters = () => {
     setFilters({
@@ -117,6 +113,27 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   return (
     <div className="p-6 space-y-5 max-w-7xl mx-auto">
+      {/* API Error Banner */}
+      {error && (
+        <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-between text-xs text-rose-300">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <div>
+              <span className="font-semibold text-rose-200">API Connection Error: </span>
+              <span>{error}</span>
+            </div>
+          </div>
+          <Button
+            variant="secondary"
+            size="xs"
+            onClick={fetchData}
+            leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Metrics Row */}
       <MetricsBar
         metrics={metrics}

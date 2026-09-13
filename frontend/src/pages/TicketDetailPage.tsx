@@ -85,10 +85,13 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({
     setIsUpdatingStatus(true);
     setActionError(null);
     try {
-      const updated = await ticketService.updateTicket(ticket.id, {
+      await ticketService.updateTicket(ticket.ticket_id || ticket.id, {
         status: newStatus,
       });
-      setTicket((prev) => (prev ? { ...prev, ...updated } : null));
+      const refreshed = await ticketService.getTicketById(ticket.ticket_id || ticket.id);
+      if (refreshed) {
+        setTicket(refreshed);
+      }
       onTicketUpdated?.();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update status';
@@ -103,10 +106,13 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({
     setIsUpdatingPriority(true);
     setActionError(null);
     try {
-      const updated = await ticketService.updateTicket(ticket.id, {
+      await ticketService.updateTicket(ticket.ticket_id || ticket.id, {
         priority: newPriority,
       });
-      setTicket((prev) => (prev ? { ...prev, ...updated } : null));
+      const refreshed = await ticketService.getTicketById(ticket.ticket_id || ticket.id);
+      if (refreshed) {
+        setTicket(refreshed);
+      }
       onTicketUpdated?.();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update priority';
@@ -123,16 +129,11 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({
     setIsAddingNote(true);
     setActionError(null);
     try {
-      const newNote = await ticketService.addTicketNote(ticket.id, noteText);
-      setTicket((prev) =>
-        prev
-          ? {
-              ...prev,
-              notes: [...prev.notes, newNote],
-              updated_at: new Date().toISOString(),
-            }
-          : null
-      );
+      await ticketService.addTicketNote(ticket.ticket_id || ticket.id, noteText);
+      const refreshed = await ticketService.getTicketById(ticket.ticket_id || ticket.id);
+      if (refreshed) {
+        setTicket(refreshed);
+      }
       setNoteText('');
       onTicketUpdated?.();
     } catch (err: unknown) {
@@ -215,7 +216,7 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({
           <div>
             <div className="flex items-center gap-2.5">
               <span className="font-mono text-base font-bold text-slate-100">
-                #{ticket.ticket_number}
+                {ticket.ticket_id || `#${ticket.ticket_number}`}
               </span>
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
@@ -573,8 +574,8 @@ export const TicketDetailPage: React.FC<TicketDetailPageProps> = ({
 
               <div className="flex justify-between text-slate-400 pt-2 border-t border-slate-800/80">
                 <span className="text-slate-500">Record ID</span>
-                <span className="font-mono text-[10px] text-slate-500 truncate max-w-[120px]" title={ticket.id}>
-                  {ticket.id}
+                <span className="font-mono text-[10px] text-slate-500 truncate max-w-[120px]" title={ticket.ticket_id || ticket.id}>
+                  {ticket.ticket_id || ticket.id}
                 </span>
               </div>
             </div>

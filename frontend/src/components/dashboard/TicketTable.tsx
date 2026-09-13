@@ -69,7 +69,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                     key={ticket.id}
                     tabIndex={0}
                     role="button"
-                    aria-label={`View details for ticket #${ticket.ticket_number}`}
+                    aria-label={`View details for ticket ${ticket.ticket_id || `#${ticket.ticket_number}`}`}
                     onClick={() => onSelectTicket(ticket.id)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -81,7 +81,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                   >
                     {/* ID */}
                     <td className="py-3 px-4 font-mono font-medium text-slate-400 group-hover:text-blue-400">
-                      #{ticket.ticket_number}
+                      {ticket.ticket_id || `#${ticket.ticket_number}`}
                     </td>
 
                     {/* Customer */}

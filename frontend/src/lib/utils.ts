@@ -5,8 +5,10 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
-export function formatRelativeTime(dateString: string): string {
+export function formatRelativeTime(dateString?: string | null): string {
+  if (!dateString) return '—';
   const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '—';
   const now = new Date();
   const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
@@ -32,8 +34,10 @@ export function formatRelativeTime(dateString: string): string {
   });
 }
 
-export function formatDateTime(dateString: string): string {
+export function formatDateTime(dateString?: string | null): string {
+  if (!dateString) return '—';
   const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '—';
   return date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',

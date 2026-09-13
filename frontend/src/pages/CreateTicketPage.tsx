@@ -66,7 +66,7 @@ export const CreateTicketPage: React.FC<CreateTicketPageProps> = ({
 
     try {
       const created = await ticketService.createTicket(formData);
-      onSuccess(created.id);
+      onSuccess(created.ticket_id || created.id);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to create ticket. Please try again.';
       setApiError(message);

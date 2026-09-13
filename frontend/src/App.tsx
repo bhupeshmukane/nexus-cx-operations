@@ -100,7 +100,7 @@ export function App() {
     breadcrumbs.push({ label: 'Create Ticket', onClick: undefined });
   } else if (view === 'detail') {
     breadcrumbs.push({
-      label: selectedTicketId ? `Ticket #${selectedTicketId.slice(0, 6)}` : 'Ticket Detail',
+      label: selectedTicketId ? `Ticket ${selectedTicketId}` : 'Ticket Detail',
       onClick: undefined,
     });
   }

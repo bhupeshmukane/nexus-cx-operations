@@ -1,3 +1,8 @@
+/**
+ * Production HTTP TicketService communicating with FastAPI backend.
+ * Replaces mock/localStorage implementation.
+ */
+
 import {
   Ticket,
   TicketWithNotes,
@@ -7,10 +12,19 @@ import {
   TicketFilterParams,
   TicketListResponse,
   OperationalMetrics,
+  TicketStatus,
+  TicketPriority,
+  ApiTicketSummary,
+  ApiTicketDetail,
 } from '../../types/ticket';
-import { INITIAL_TICKETS } from './mockData';
-
-const STORAGE_KEY = 'nexus_tickets_v1';
+import {
+  listTickets as apiListTickets,
+  getTicket as apiGetTicket,
+  createTicket as apiCreateTicket,
+  updateTicket as apiUpdateTicket,
+  parseTicketNumber,
+} from './tickets';
+import { ApiError } from './client';
 
 export interface TicketService {
   getTickets(params?: TicketFilterParams): Promise<TicketListResponse>;
@@ -21,65 +35,54 @@ export interface TicketService {
   getMetrics(): Promise<OperationalMetrics>;
 }
 
-function generateId(prefix = 'id'): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+function mapSummaryToTicket(summary: ApiTicketSummary): Ticket {
+  return {
+    id: summary.ticket_id,
+    ticket_id: summary.ticket_id,
+    ticket_number: parseTicketNumber(summary.ticket_id),
+    customer_name: summary.customer_name,
+    customer_email: summary.customer_email,
+    subject: summary.subject,
+    description: '',
+    status: (summary.status || 'open') as TicketStatus,
+    priority: summary.priority as TicketPriority | null,
+    category: summary.category,
+    ai_summary: summary.ai_summary,
+    ai_confidence: summary.ai_confidence,
+    created_at: summary.created_at,
+    updated_at: summary.updated_at,
+  };
 }
 
-class MockTicketService implements TicketService {
-  private tickets: TicketWithNotes[];
+function mapDetailToTicket(detail: ApiTicketDetail): TicketWithNotes {
+  return {
+    id: detail.ticket_id,
+    ticket_id: detail.ticket_id,
+    ticket_number: parseTicketNumber(detail.ticket_id),
+    customer_name: detail.customer_name,
+    customer_email: detail.customer_email,
+    subject: detail.subject,
+    description: detail.description,
+    status: (detail.status || 'open') as TicketStatus,
+    priority: detail.priority as TicketPriority | null,
+    category: detail.category,
+    ai_summary: detail.ai_summary,
+    ai_suggested_response: detail.ai_suggested_response,
+    ai_confidence: detail.ai_confidence,
+    created_at: detail.created_at,
+    updated_at: detail.updated_at,
+    notes: (detail.notes || []).map((n) => ({
+      id: String(n.id),
+      ticket_id: detail.ticket_id,
+      note: n.note,
+      author: n.author || 'agent',
+      created_at: n.created_at,
+    })),
+  };
+}
 
-  constructor() {
-    this.tickets = this.loadTickets();
-  }
-
-  private loadTickets(): TicketWithNotes[] {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (
-          Array.isArray(parsed) &&
-          parsed.length > 0 &&
-          typeof parsed[0] === 'object' &&
-          parsed[0] !== null &&
-          'id' in parsed[0] &&
-          'ticket_number' in parsed[0]
-        ) {
-          return parsed as TicketWithNotes[];
-        } else {
-          console.warn('[NEXUS] Invalid tickets format in localStorage, resetting to initial data.');
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      }
-    } catch (err) {
-      console.warn('[NEXUS] Could not parse tickets from localStorage, resetting:', err);
-      try {
-        localStorage.removeItem(STORAGE_KEY);
-      } catch {
-        // Ignore removal error in private/restricted browsing modes
-      }
-    }
-    return JSON.parse(JSON.stringify(INITIAL_TICKETS));
-  }
-
-  private saveTickets(): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.tickets));
-    } catch (err) {
-      console.warn('[NEXUS] Failed to persist tickets to localStorage:', err);
-    }
-  }
-
-  // Artificial latency to exercise UI loading skeletons
-  private async delay(ms = 180): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
+class HttpTicketService implements TicketService {
   async getTickets(params: TicketFilterParams = {}): Promise<TicketListResponse> {
-    await this.delay(150);
     const {
       search = '',
       status = 'all',
@@ -90,42 +93,32 @@ class MockTicketService implements TicketService {
       pageSize = 10,
     } = params;
 
-    let filtered = [...this.tickets];
+    // Call FastAPI GET /api/tickets with server-side status and search filters
+    const summaries = await apiListTickets({
+      search: search.trim() || undefined,
+      status: status !== 'all' ? status : undefined,
+    });
 
-    // Filter by status
-    if (status && status !== 'all') {
-      filtered = filtered.filter((t) => t.status === status);
-    }
+    let tickets: Ticket[] = summaries.map(mapSummaryToTicket);
 
-    // Filter by priority
+    // Client-side priority filter if specified
     if (priority && priority !== 'all') {
-      filtered = filtered.filter((t) => t.priority === priority);
+      tickets = tickets.filter((t) => t.priority === priority);
     }
 
-    // Filter by search query
-    if (search.trim()) {
-      const query = search.toLowerCase().trim();
-      filtered = filtered.filter(
-        (t) =>
-          t.ticket_number.toString().includes(query) ||
-          t.customer_name.toLowerCase().includes(query) ||
-          t.customer_email.toLowerCase().includes(query) ||
-          t.subject.toLowerCase().includes(query) ||
-          (t.category && t.category.toLowerCase().includes(query))
-      );
-    }
-
-    // Sorting
-    filtered.sort((a, b) => {
+    // Client-side sorting
+    tickets.sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'created_at') {
         comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       } else if (sortBy === 'updated_at') {
-        comparison = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+        const timeA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const timeB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        comparison = timeA - timeB;
       } else if (sortBy === 'ticket_number') {
         comparison = a.ticket_number - b.ticket_number;
       } else if (sortBy === 'priority') {
-        const priorityWeight = { urgent: 4, high: 3, medium: 2, low: 1 };
+        const priorityWeight: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
         const weightA = a.priority ? priorityWeight[a.priority] || 0 : 0;
         const weightB = b.priority ? priorityWeight[b.priority] || 0 : 0;
         comparison = weightA - weightB;
@@ -134,16 +127,13 @@ class MockTicketService implements TicketService {
       return sortOrder === 'desc' ? -comparison : comparison;
     });
 
-    const total = filtered.length;
+    const total = tickets.length;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const startIndex = (page - 1) * pageSize;
-    const paginatedTickets = filtered.slice(startIndex, startIndex + pageSize);
-
-    // Strip notes in list view for performance (matching SQL tickets table)
-    const listTickets: Ticket[] = paginatedTickets.map(({ notes: _, ...ticket }) => ticket);
+    const paginatedTickets = tickets.slice(startIndex, startIndex + pageSize);
 
     return {
-      tickets: listTickets,
+      tickets: paginatedTickets,
       total,
       page,
       pageSize,
@@ -152,99 +142,88 @@ class MockTicketService implements TicketService {
   }
 
   async getTicketById(id: string): Promise<TicketWithNotes | null> {
-    await this.delay(120);
-    const found = this.tickets.find((t) => t.id === id || t.ticket_number.toString() === id);
-    if (!found) return null;
-    return JSON.parse(JSON.stringify(found));
+    try {
+      const detail = await apiGetTicket(id);
+      return mapDetailToTicket(detail);
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 404) {
+        return null;
+      }
+      throw err;
+    }
   }
 
   async createTicket(input: CreateTicketInput): Promise<Ticket> {
-    await this.delay(200);
-    const highestNumber = this.tickets.reduce((max, t) => Math.max(max, t.ticket_number), 1000);
-    const now = new Date().toISOString();
+    const res = await apiCreateTicket({
+      customer_name: input.customer_name,
+      customer_email: input.customer_email,
+      subject: input.subject,
+      description: input.description,
+    });
 
-    // Default heuristic category & AI assist placeholder until backend AI triage pipeline is hooked
-    const newTicket: TicketWithNotes = {
-      id: generateId('ticket'),
-      ticket_number: highestNumber + 1,
-      customer_name: input.customer_name.trim(),
-      customer_email: input.customer_email.trim(),
-      subject: input.subject.trim(),
-      description: input.description.trim(),
-      status: 'open',
-      priority: input.priority || 'medium',
-      category: 'General Operations',
-      ai_summary: `Customer ${input.customer_name.trim()} submitted inquiry regarding: ${input.subject.trim()}. Awaiting agent evaluation.`,
-      ai_suggested_response: `Hello ${input.customer_name.trim()},\n\nThank you for reaching out to NEXUS Support regarding "${input.subject.trim()}". We have received your inquiry and our operational team is currently reviewing your account details. We will update this thread shortly with actionable next steps.`,
-      ai_confidence: 0.8500,
-      created_at: now,
-      updated_at: now,
-      notes: [],
-    };
-
-    this.tickets.unshift(newTicket);
-    this.saveTickets();
-
-    const { notes: _, ...ticketOnly } = newTicket;
-    return ticketOnly;
+    // Fetch the newly created ticket from the server
+    const detail = await apiGetTicket(res.ticket_id);
+    return mapDetailToTicket(detail);
   }
 
   async updateTicket(id: string, updates: UpdateTicketInput): Promise<Ticket> {
-    await this.delay(100);
-    const index = this.tickets.findIndex((t) => t.id === id);
-    if (index === -1) {
-      throw new Error(`Ticket with ID ${id} not found`);
+    let currentStatus: TicketStatus = updates.status || 'open';
+
+    if (!updates.status) {
+      const existing = await apiGetTicket(id);
+      currentStatus = (existing.status as TicketStatus) || 'open';
     }
 
-    const current = this.tickets[index];
-    const now = new Date().toISOString();
+    await apiUpdateTicket(id, {
+      status: currentStatus,
+      notes: updates.notes || '',
+    });
 
-    const updated: TicketWithNotes = {
-      ...current,
-      ...(updates.status ? { status: updates.status } : {}),
-      ...(updates.priority !== undefined ? { priority: updates.priority } : {}),
-      updated_at: now,
-    };
-
-    this.tickets[index] = updated;
-    this.saveTickets();
-
-    const { notes: _, ...ticketOnly } = updated;
-    return ticketOnly;
+    const refreshed = await apiGetTicket(id);
+    return mapDetailToTicket(refreshed);
   }
 
-  async addTicketNote(ticketId: string, noteText: string, author = 'Agent (You)'): Promise<TicketNote> {
-    await this.delay(120);
-    const index = this.tickets.findIndex((t) => t.id === ticketId);
-    if (index === -1) {
-      throw new Error(`Ticket with ID ${ticketId} not found`);
+  async addTicketNote(ticketId: string, noteText: string, author = 'agent'): Promise<TicketNote> {
+    const existing = await apiGetTicket(ticketId);
+    const currentStatus = (existing.status as TicketStatus) || 'open';
+
+    await apiUpdateTicket(ticketId, {
+      status: currentStatus,
+      notes: noteText.trim(),
+    });
+
+    const refreshed = await apiGetTicket(ticketId);
+    const notes = refreshed.notes || [];
+    if (notes.length > 0) {
+      const latest = notes[notes.length - 1];
+      return {
+        id: String(latest.id),
+        ticket_id: refreshed.ticket_id,
+        note: latest.note,
+        author: latest.author || author,
+        created_at: latest.created_at,
+      };
     }
 
-    const newNote: TicketNote = {
-      id: generateId('note'),
+    return {
+      id: `note-${Date.now()}`,
       ticket_id: ticketId,
       note: noteText.trim(),
       author,
       created_at: new Date().toISOString(),
     };
-
-    this.tickets[index].notes.push(newNote);
-    this.tickets[index].updated_at = new Date().toISOString();
-    this.saveTickets();
-
-    return newNote;
   }
 
   async getMetrics(): Promise<OperationalMetrics> {
-    await this.delay(80);
-    const total = this.tickets.length;
-    const open = this.tickets.filter((t) => t.status === 'open').length;
-    const in_progress = this.tickets.filter((t) => t.status === 'in_progress').length;
-    const closed = this.tickets.filter((t) => t.status === 'closed').length;
-    const urgent_high = this.tickets.filter(
+    const summaries = await apiListTickets();
+    const total = summaries.length;
+    const open = summaries.filter((t) => t.status === 'open').length;
+    const in_progress = summaries.filter((t) => t.status === 'in_progress').length;
+    const closed = summaries.filter((t) => t.status === 'closed').length;
+    const urgent_high = summaries.filter(
       (t) => (t.priority === 'urgent' || t.priority === 'high') && t.status !== 'closed'
     ).length;
-    const triaged = this.tickets.filter((t) => t.ai_summary !== null).length;
+    const triaged = summaries.filter((t) => t.ai_summary !== null).length;
     const ai_triaged_percent = total > 0 ? Math.round((triaged / total) * 100) : 0;
 
     return {
@@ -258,4 +237,4 @@ class MockTicketService implements TicketService {
   }
 }
 
-export const ticketService: TicketService = new MockTicketService();
+export const ticketService: TicketService = new HttpTicketService();

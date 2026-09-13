@@ -4,6 +4,7 @@ export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 export interface Ticket {
   id: string;
+  ticket_id?: string;
   ticket_number: number;
   customer_name: string;
   customer_email: string;
@@ -13,10 +14,10 @@ export interface Ticket {
   priority: TicketPriority | null;
   category: string | null;
   ai_summary: string | null;
-  ai_suggested_response: string | null;
+  ai_suggested_response?: string | null;
   ai_confidence: number | null;
   created_at: string;
-  updated_at: string;
+  updated_at: string | null;
 }
 
 export interface TicketNote {
@@ -42,6 +43,7 @@ export interface CreateTicketInput {
 export interface UpdateTicketInput {
   status?: TicketStatus;
   priority?: TicketPriority | null;
+  notes?: string;
 }
 
 export interface TicketFilterParams {
@@ -69,4 +71,63 @@ export interface OperationalMetrics {
   closed: number;
   urgent_high: number;
   ai_triaged_percent: number;
+}
+
+// Backend API contracts
+export interface ApiTicketSummary {
+  ticket_id: string;
+  customer_name: string;
+  customer_email: string;
+  subject: string;
+  status: string;
+  priority: string | null;
+  category: string | null;
+  ai_summary: string | null;
+  ai_confidence: number | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface ApiTicketDetail {
+  ticket_id: string;
+  customer_name: string;
+  customer_email: string;
+  subject: string;
+  description: string;
+  status: string;
+  priority: string | null;
+  category: string | null;
+  ai_summary: string | null;
+  ai_suggested_response: string | null;
+  ai_confidence: number | null;
+  created_at: string;
+  updated_at: string | null;
+  notes: {
+    id: string;
+    note: string;
+    author: string;
+    created_at: string;
+  }[];
+}
+
+export interface ApiTicketCreatePayload {
+  customer_name: string;
+  customer_email: string;
+  subject: string;
+  description: string;
+}
+
+export interface ApiTicketCreateResponse {
+  ticket_id: string;
+  created_at: string;
+}
+
+export interface ApiTicketUpdatePayload {
+  status: TicketStatus;
+  notes?: string;
+}
+
+export interface ApiTicketUpdateResponse {
+  success: boolean;
+  updated_at: string;
 }
