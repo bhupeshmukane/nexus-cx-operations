@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     AI_API_KEY: Optional[str] = None
     ENVIRONMENT: str = "development"
+    CORS_ORIGINS: list[str] = [
+        "http://127.0.0.1:5180",
+        "http://127.0.0.1:5181",
+        "http://localhost:5180",
+        "http://localhost:5181",
+    ]
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
